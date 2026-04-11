@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Email Automation</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f5f7fa;
+      color: #333;
+      line-height: 1.6;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 24px 20px;
+    }
+
+    h1 {
+      font-size: 24px;
+      font-weight: 600;
+      margin-bottom: 24px;
+      color: #1a1a1a;
+    }
+
+    /* Collapsible settings */
+    .settings-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px 8px 0 0;
+      padding: 14px 20px;
+      cursor: pointer;
+      user-select: none;
+      font-weight: 600;
+      font-size: 15px;
+    }
+
+    .settings-toggle.collapsed {
+      border-radius: 8px;
+    }
+
+    .settings-toggle .arrow {
+      transition: transform 0.2s;
+      font-size: 12px;
+    }
+
+    .settings-toggle.collapsed .arrow {
+      transform: rotate(-90deg);
+    }
+
+    .settings-panel {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-top: none;
+      border-radius: 0 0 8px 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .settings-panel.hidden {
+      display: none;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .form-group.full-width {
+      grid-column: 1 / -1;
+    }
+
+    .form-group label {
+      font-size: 13px;
+      font-weight: 500;
+      color: #555;
+      margin-bottom: 4px;
+    }
+
+    .form-group input,
+    .form-group textarea {
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: inherit;
+      transition: border-color 0.2s;
+    }
+
+    .form-group input:focus,
+    .form-group textarea:focus {
+      outline: none;
+      border-color: #4a90d9;
+    }
+
+    .form-group textarea {
+      resize: vertical;
+      min-height: 70px;
+    }
+
+    /* Upload section */
+    .section {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .section h2 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 14px;
+    }
+
+    .drop-zone {
+      border: 2px dashed #ccc;
+      border-radius: 8px;
+      padding: 40px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      color: #888;
+      font-size: 14px;
+    }
+
+    .drop-zone:hover,
+    .drop-zone.dragover {
+      border-color: #4a90d9;
+      background: #f0f6ff;
+    }
+
+    .drop-zone input[type="file"] {
+      display: none;
+    }
+
+    .file-name {
+      margin-top: 10px;
+      font-size: 13px;
+      color: #4a90d9;
+      font-weight: 500;
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 24px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s, opacity 0.2s;
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: #4a90d9;
+      color: #fff;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: #3a7bc8;
+    }
+
+    .btn-success {
+      background: #34a853;
+      color: #fff;
+    }
+
+    .btn-success:hover:not(:disabled) {
+      background: #2d9249;
+    }
+
+    .btn-danger {
+      background: #ea4335;
+      color: #fff;
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+
+    .btn-danger:hover:not(:disabled) {
+      background: #d33426;
+    }
+
+    .actions {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    /* Spinner */
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Status message */
+    .status {
+      font-size: 14px;
+      color: #555;
+    }
+
+    .status.error {
+      color: #ea4335;
+    }
+
+    .status.success {
+      color: #34a853;
+    }
+
+    /* Email preview cards */
+    .email-card {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+
+    .email-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 8px;
+    }
+
+    .email-card .to {
+      font-size: 14px;
+      font-weight: 600;
+      color: #1a1a1a;
+    }
+
+    .email-card .subject {
+      font-size: 13px;
+      color: #4a90d9;
+      margin-bottom: 8px;
+    }
+
+    .email-card .body {
+      font-size: 13px;
+      color: #555;
+      white-space: pre-wrap;
+      background: #fafafa;
+      border-radius: 4px;
+      padding: 12px;
+      border: 1px solid #eee;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    .email-card .error-badge {
+      font-size: 12px;
+      color: #ea4335;
+      font-weight: 500;
+    }
+
+    .email-card .send-status {
+      font-size: 12px;
+      font-weight: 500;
+      margin-top: 8px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      display: inline-block;
+    }
+
+    .send-status.sent {
+      background: #e6f4ea;
+      color: #34a853;
+    }
+
+    .send-status.failed {
+      background: #fce8e6;
+      color: #ea4335;
+    }
+
+    /* Summary */
+    .summary {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+
+    .summary strong {
+      color: #1a1a1a;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Email Automation</h1>
+
+    <!-- Settings Panel -->
+    <div class="settings-toggle" onclick="toggleSettings()">
+      <span>Settings</span>
+      <span class="arrow">&#9660;</span>
+    </div>
+    <div class="settings-panel" id="settingsPanel">
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="openaiKey">OpenAI API Key</label>
+          <input type="password" id="openaiKey" placeholder="sk-...">
+        </div>
+        <div class="form-group">
+          <label for="subjectPrefix">Subject Prefix</label>
+          <input type="text" id="subjectPrefix" placeholder="Optional prefix">
+        </div>
+        <div class="form-group">
+          <label for="smtpHost">SMTP Host</label>
+          <input type="text" id="smtpHost" placeholder="smtp.example.com">
+        </div>
+        <div class="form-group">
+          <label for="smtpPort">SMTP Port</label>
+          <input type="text" id="smtpPort" placeholder="587">
+        </div>
+        <div class="form-group">
+          <label for="smtpUser">SMTP User</label>
+          <input type="text" id="smtpUser" placeholder="you@example.com">
+        </div>
+        <div class="form-group">
+          <label for="smtpPass">SMTP Password</label>
+          <input type="password" id="smtpPass" placeholder="Password">
+        </div>
+        <div class="form-group">
+          <label for="senderName">Sender Name</label>
+          <input type="text" id="senderName" placeholder="Your Name">
+        </div>
+        <div class="form-group">
+          <label for="senderEmail">Sender Email</label>
+          <input type="text" id="senderEmail" placeholder="you@example.com">
+        </div>
+        <div class="form-group full-width">
+          <label for="emailPrompt">Email Prompt</label>
+          <textarea id="emailPrompt" rows="3" placeholder="Write a professional email to {Contact Person} at {Company} about {Film Title}..."></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- CSV Upload -->
+    <div class="section">
+      <h2>Upload CSV</h2>
+      <div class="drop-zone" id="dropZone" onclick="document.getElementById('csvFile').click()">
+        <div>Drag & drop a CSV file here, or click to browse</div>
+        <div class="file-name" id="fileName"></div>
+        <input type="file" id="csvFile" accept=".csv">
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="section">
+      <div class="actions">
+        <button class="btn btn-primary" id="generateBtn" onclick="generatePreviews()" disabled>
+          Generate Previews
+        </button>
+        <button class="btn btn-success" id="sendBtn" onclick="sendAll()" style="display:none">
+          Send All
+        </button>
+        <span class="status" id="status"></span>
+      </div>
+    </div>
+
+    <!-- Previews -->
+    <div id="previews"></div>
+  </div>
+
+  <script>
+    let csvFile = null;
+    let generatedEmails = [];
+
+    // ── Load config from server ──────────────────────────────────────────────
+
+    async function loadConfig() {
+      try {
+        const res = await fetch('/api/config');
+        const config = await res.json();
+        document.getElementById('smtpHost').value = config.smtpHost || '';
+        document.getElementById('smtpPort').value = config.smtpPort || '587';
+        document.getElementById('smtpUser').value = config.smtpUser || '';
+        document.getElementById('senderName').value = config.senderName || '';
+        document.getElementById('senderEmail').value = config.senderEmail || '';
+        document.getElementById('subjectPrefix').value = config.subjectPrefix || '';
+        document.getElementById('emailPrompt').value = config.emailPrompt || '';
+      } catch (e) {
+        // Ignore — user can fill in manually
+      }
+    }
+
+    loadConfig();
+
+    // ── Settings toggle ──────────────────────────────────────────────────────
+
+    function toggleSettings() {
+      const panel = document.getElementById('settingsPanel');
+      const toggle = document.querySelector('.settings-toggle');
+      panel.classList.toggle('hidden');
+      toggle.classList.toggle('collapsed');
+    }
+
+    // ── File upload ──────────────────────────────────────────────────────────
+
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('csvFile');
+
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files.length > 0) {
+        csvFile = e.target.files[0];
+        document.getElementById('fileName').textContent = csvFile.name;
+        document.getElementById('generateBtn').disabled = false;
+      }
+    });
+
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.classList.remove('dragover');
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      if (e.dataTransfer.files.length > 0) {
+        const file = e.dataTransfer.files[0];
+        if (file.name.endsWith('.csv')) {
+          csvFile = file;
+          document.getElementById('fileName').textContent = csvFile.name;
+          document.getElementById('generateBtn').disabled = false;
+        }
+      }
+    });
+
+    // ── Generate previews ────────────────────────────────────────────────────
+
+    async function generatePreviews() {
+      if (!csvFile) return;
+
+      const btn = document.getElementById('generateBtn');
+      const status = document.getElementById('status');
+      const sendBtn = document.getElementById('sendBtn');
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Generating...';
+      sendBtn.style.display = 'none';
+      status.textContent = '';
+      status.className = 'status';
+      document.getElementById('previews').innerHTML = '';
+
+      const formData = new FormData();
+      formData.append('csv', csvFile);
+      formData.append('openaiKey', document.getElementById('openaiKey').value);
+      formData.append('emailPrompt', document.getElementById('emailPrompt').value);
+      formData.append('subjectPrefix', document.getElementById('subjectPrefix').value);
+
+      try {
+        const res = await fetch('/api/generate', { method: 'POST', body: formData });
+        const data = await res.json();
+
+        if (!res.ok) {
+          status.textContent = data.error || 'Generation failed';
+          status.className = 'status error';
+          btn.disabled = false;
+          btn.textContent = 'Generate Previews';
+          return;
+        }
+
+        generatedEmails = data.emails;
+        renderPreviews();
+
+        const successCount = generatedEmails.filter(e => !e.error).length;
+        status.textContent = `Generated ${successCount}/${generatedEmails.length} emails`;
+        status.className = 'status success';
+
+        if (successCount > 0) {
+          sendBtn.style.display = 'inline-flex';
+        }
+      } catch (err) {
+        status.textContent = 'Network error: ' + err.message;
+        status.className = 'status error';
+      }
+
+      btn.disabled = false;
+      btn.textContent = 'Generate Previews';
+    }
+
+    // ── Render email previews ────────────────────────────────────────────────
+
+    function renderPreviews() {
+      const container = document.getElementById('previews');
+      container.innerHTML = '';
+
+      generatedEmails.forEach((email, idx) => {
+        if (email._removed) return;
+
+        const card = document.createElement('div');
+        card.className = 'email-card';
+        card.id = 'card-' + idx;
+
+        if (email.error) {
+          card.innerHTML = `
+            <div class="email-card-header">
+              <div>
+                <div class="to">${esc(email.contactName)} &lt;${esc(email.to)}&gt;</div>
+                <div class="error-badge">Error: ${esc(email.error)}</div>
+              </div>
+            </div>
+          `;
+        } else {
+          card.innerHTML = `
+            <div class="email-card-header">
+              <div>
+                <div class="to">${esc(email.contactName)} &lt;${esc(email.to)}&gt;</div>
+                <div class="subject">${esc(email.subject)}</div>
+              </div>
+              <button class="btn btn-danger" onclick="removeEmail(${idx})">Remove</button>
+            </div>
+            <div class="body">${esc(email.body)}</div>
+          `;
+        }
+
+        container.appendChild(card);
+      });
+
+      updateSendButton();
+    }
+
+    function removeEmail(idx) {
+      generatedEmails[idx]._removed = true;
+      document.getElementById('card-' + idx).remove();
+      updateSendButton();
+    }
+
+    function updateSendButton() {
+      const remaining = generatedEmails.filter(e => !e.error && !e._removed);
+      const sendBtn = document.getElementById('sendBtn');
+      if (remaining.length > 0) {
+        sendBtn.style.display = 'inline-flex';
+        sendBtn.textContent = `Send All (${remaining.length})`;
+      } else {
+        sendBtn.style.display = 'none';
+      }
+    }
+
+    // ── Send all emails ──────────────────────────────────────────────────────
+
+    async function sendAll() {
+      const btn = document.getElementById('sendBtn');
+      const status = document.getElementById('status');
+
+      const emailsToSend = generatedEmails.filter(e => !e.error && !e._removed);
+      if (emailsToSend.length === 0) return;
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Sending...';
+      status.textContent = '';
+      status.className = 'status';
+
+      const payload = {
+        emails: emailsToSend.map(e => ({
+          to: e.to,
+          subject: e.subject,
+          body: e.body,
+        })),
+        smtp: {
+          host: document.getElementById('smtpHost').value,
+          port: parseInt(document.getElementById('smtpPort').value) || 587,
+          user: document.getElementById('smtpUser').value,
+          pass: document.getElementById('smtpPass').value,
+        },
+        sender: {
+          name: document.getElementById('senderName').value,
+          email: document.getElementById('senderEmail').value,
+        },
+      };
+
+      try {
+        const res = await fetch('/api/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          status.textContent = data.error || 'Send failed';
+          status.className = 'status error';
+          btn.disabled = false;
+          btn.textContent = `Send All (${emailsToSend.length})`;
+          return;
+        }
+
+        // Update cards with send status
+        const resultMap = {};
+        data.results.forEach(r => { resultMap[r.to] = r; });
+
+        generatedEmails.forEach((email, idx) => {
+          if (email._removed || email.error) return;
+          const result = resultMap[email.to];
+          if (!result) return;
+
+          const card = document.getElementById('card-' + idx);
+          if (!card) return;
+
+          // Remove the remove button
+          const removeBtn = card.querySelector('.btn-danger');
+          if (removeBtn) removeBtn.remove();
+
+          // Add status badge
+          const existing = card.querySelector('.send-status');
+          if (existing) existing.remove();
+
+          const badge = document.createElement('div');
+          if (result.success) {
+            badge.className = 'send-status sent';
+            badge.textContent = 'Sent';
+          } else {
+            badge.className = 'send-status failed';
+            badge.textContent = 'Failed: ' + (result.error || 'Unknown error');
+          }
+          card.appendChild(badge);
+        });
+
+        const sentCount = data.results.filter(r => r.success).length;
+        const failCount = data.results.filter(r => !r.success).length;
+        status.textContent = `Sent ${sentCount}/${data.results.length}` + (failCount > 0 ? ` (${failCount} failed)` : '');
+        status.className = failCount > 0 ? 'status error' : 'status success';
+
+        btn.style.display = 'none';
+      } catch (err) {
+        status.textContent = 'Network error: ' + err.message;
+        status.className = 'status error';
+        btn.disabled = false;
+        btn.textContent = `Send All (${emailsToSend.length})`;
+      }
+    }
+
+    // ── Escape HTML ──────────────────────────────────────────────────────────
+
+    function esc(str) {
+      const d = document.createElement('div');
+      d.textContent = str || '';
+      return d.innerHTML;
+    }
+  </script>
+</body>
+</html>
