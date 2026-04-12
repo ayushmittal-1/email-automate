@@ -6,7 +6,6 @@ import {
   generateEmail,
   createTransport,
   sendEmail,
-  interpolate,
   type SMTPConfig,
   type SenderInfo,
 } from "./index.js";
