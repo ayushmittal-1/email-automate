@@ -1,10 +1,8 @@
 import "dotenv/config";
 import express from "express";
-import multer from "multer";
 import path from "path";
 import OpenAI from "openai";
 import {
-  parseCSV,
   generateEmail,
   createTransport,
   sendEmail,
@@ -14,7 +12,6 @@ import {
 } from "./index.js";
 
 const app = express();
-const upload = multer({ storage: multer.memoryStorage() });
 
 app.use(express.json());
 app.use(express.static(path.join(import.meta.dirname ?? __dirname, "public")));
@@ -33,37 +30,29 @@ app.get("/api/config", (_req, res) => {
   });
 });
 
-// ── POST /api/generate — upload CSV + settings, return generated emails ─────
+// ── POST /api/generate — accept JSON rows + settings, return generated emails ─
 
-app.post("/api/generate", upload.single("csv"), async (req, res) => {
+app.post("/api/generate", async (req, res) => {
   try {
-    if (!req.file) {
-      res.status(400).json({ error: "No CSV file uploaded" });
+    const { rows, openaiKey, emailPrompt, subjectPrefix = "" } = req.body as {
+      rows: Record<string, string>[];
+      openaiKey: string;
+      emailPrompt: string;
+      subjectPrefix?: string;
+    };
+
+    if (!rows || !Array.isArray(rows) || rows.length === 0) {
+      res.status(400).json({ error: "No rows provided" });
       return;
     }
 
-    const csvContent = req.file.buffer.toString("utf-8");
-    const settings = req.body;
-
-    const openaiKey = settings.openaiKey;
     if (!openaiKey) {
       res.status(400).json({ error: "OpenAI API key is required" });
       return;
     }
 
-    const promptTemplate = settings.emailPrompt;
-    if (!promptTemplate) {
+    if (!emailPrompt) {
       res.status(400).json({ error: "Email prompt is required" });
-      return;
-    }
-
-    const subjectPrefix = settings.subjectPrefix ?? "";
-
-    let rows: Record<string, string>[];
-    try {
-      rows = parseCSV(csvContent);
-    } catch (err: any) {
-      res.status(400).json({ error: err.message });
       return;
     }
 
@@ -82,7 +71,7 @@ app.post("/api/generate", upload.single("csv"), async (req, res) => {
       const email = row["Email"];
 
       try {
-        const generated = await generateEmail(openai, promptTemplate, row);
+        const generated = await generateEmail(openai, emailPrompt, row);
         const subject = subjectPrefix
           ? `${subjectPrefix} ${generated.subject}`
           : generated.subject;

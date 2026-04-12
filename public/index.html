@@ -316,6 +316,53 @@
     .summary strong {
       color: #1a1a1a;
     }
+
+    /* Filters */
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .filter-group {
+      display: flex;
+      flex-direction: column;
+      min-width: 180px;
+      flex: 1;
+    }
+
+    .filter-group label {
+      font-size: 13px;
+      font-weight: 500;
+      color: #555;
+      margin-bottom: 4px;
+    }
+
+    .filter-group select {
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: inherit;
+      background: #fff;
+      cursor: pointer;
+    }
+
+    .filter-group select:focus {
+      outline: none;
+      border-color: #4a90d9;
+    }
+
+    .filter-count {
+      font-size: 13px;
+      color: #555;
+      margin-top: 8px;
+    }
+
+    .filter-count strong {
+      color: #4a90d9;
+    }
   </style>
 </head>
 <body>
@@ -378,6 +425,13 @@
       </div>
     </div>
 
+    <!-- Filters (shown after CSV upload) -->
+    <div class="section" id="filterSection" style="display:none">
+      <h2>Filter Contacts</h2>
+      <div class="filters" id="filters"></div>
+      <div class="filter-count" id="filterCount"></div>
+    </div>
+
     <!-- Actions -->
     <div class="section">
       <div class="actions">
@@ -397,6 +451,9 @@
 
   <script>
     let csvFile = null;
+    let csvRows = [];
+    let csvColumns = [];
+    let activeFilters = {};
     let generatedEmails = [];
 
     // ── Load config from server ──────────────────────────────────────────────
@@ -412,9 +469,7 @@
         document.getElementById('senderEmail').value = config.senderEmail || '';
         document.getElementById('subjectPrefix').value = config.subjectPrefix || '';
         document.getElementById('emailPrompt').value = config.emailPrompt || '';
-      } catch (e) {
-        // Ignore — user can fill in manually
-      }
+      } catch (e) {}
     }
 
     loadConfig();
@@ -428,17 +483,52 @@
       toggle.classList.toggle('collapsed');
     }
 
+    // ── Simple CSV parser ────────────────────────────────────────────────────
+
+    function parseCSVClient(text) {
+      const lines = text.trim().split('\n');
+      if (lines.length < 2) return { columns: [], rows: [] };
+
+      const columns = lines[0].split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+      const rows = [];
+
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        const values = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+        const row = {};
+        columns.forEach((col, idx) => { row[col] = values[idx] || ''; });
+        rows.push(row);
+      }
+
+      return { columns, rows };
+    }
+
     // ── File upload ──────────────────────────────────────────────────────────
 
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('csvFile');
 
-    fileInput.addEventListener('change', (e) => {
-      if (e.target.files.length > 0) {
-        csvFile = e.target.files[0];
-        document.getElementById('fileName').textContent = csvFile.name;
+    function handleFile(file) {
+      if (!file || !file.name.endsWith('.csv')) return;
+      csvFile = file;
+      document.getElementById('fileName').textContent = file.name;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const parsed = parseCSVClient(e.target.result);
+        csvRows = parsed.rows;
+        csvColumns = parsed.columns;
+        activeFilters = {};
+        buildFilters();
         document.getElementById('generateBtn').disabled = false;
-      }
+      };
+      reader.readAsText(file);
+    }
+
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files.length > 0) handleFile(e.target.files[0]);
     });
 
     dropZone.addEventListener('dragover', (e) => {
@@ -453,20 +543,92 @@
     dropZone.addEventListener('drop', (e) => {
       e.preventDefault();
       dropZone.classList.remove('dragover');
-      if (e.dataTransfer.files.length > 0) {
-        const file = e.dataTransfer.files[0];
-        if (file.name.endsWith('.csv')) {
-          csvFile = file;
-          document.getElementById('fileName').textContent = csvFile.name;
-          document.getElementById('generateBtn').disabled = false;
-        }
-      }
+      if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
     });
+
+    // ── Filters ──────────────────────────────────────────────────────────────
+
+    function buildFilters() {
+      const section = document.getElementById('filterSection');
+      const container = document.getElementById('filters');
+      container.innerHTML = '';
+
+      if (csvRows.length === 0) {
+        section.style.display = 'none';
+        return;
+      }
+
+      // Build a dropdown for each column (except Email which is unique per row)
+      const filterColumns = csvColumns.filter(c => c !== 'Email');
+
+      filterColumns.forEach(col => {
+        const uniqueValues = [...new Set(csvRows.map(r => r[col]).filter(Boolean))].sort();
+        if (uniqueValues.length <= 1) return; // no point filtering 1 value
+
+        const group = document.createElement('div');
+        group.className = 'filter-group';
+
+        const label = document.createElement('label');
+        label.textContent = col;
+        group.appendChild(label);
+
+        const select = document.createElement('select');
+        select.id = 'filter-' + col;
+        select.addEventListener('change', () => {
+          if (select.value === '') {
+            delete activeFilters[col];
+          } else {
+            activeFilters[col] = select.value;
+          }
+          updateFilterCount();
+        });
+
+        const allOption = document.createElement('option');
+        allOption.value = '';
+        allOption.textContent = `All (${uniqueValues.length})`;
+        select.appendChild(allOption);
+
+        uniqueValues.forEach(val => {
+          const opt = document.createElement('option');
+          opt.value = val;
+          opt.textContent = val;
+          select.appendChild(opt);
+        });
+
+        group.appendChild(select);
+        container.appendChild(group);
+      });
+
+      section.style.display = 'block';
+      updateFilterCount();
+    }
+
+    function getFilteredRows() {
+      return csvRows.filter(row => {
+        for (const [col, val] of Object.entries(activeFilters)) {
+          if (row[col] !== val) return false;
+        }
+        return true;
+      });
+    }
+
+    function updateFilterCount() {
+      const filtered = getFilteredRows();
+      const el = document.getElementById('filterCount');
+      el.innerHTML = `<strong>${filtered.length}</strong> of ${csvRows.length} contacts selected`;
+    }
 
     // ── Generate previews ────────────────────────────────────────────────────
 
     async function generatePreviews() {
-      if (!csvFile) return;
+      if (csvRows.length === 0) return;
+
+      const filtered = getFilteredRows();
+      if (filtered.length === 0) {
+        document.getElementById('status').textContent = 'No contacts match the current filters';
+        document.getElementById('status').className = 'status error';
+        return;
+      }
 
       const btn = document.getElementById('generateBtn');
       const status = document.getElementById('status');
@@ -479,14 +641,17 @@
       status.className = 'status';
       document.getElementById('previews').innerHTML = '';
 
-      const formData = new FormData();
-      formData.append('csv', csvFile);
-      formData.append('openaiKey', document.getElementById('openaiKey').value);
-      formData.append('emailPrompt', document.getElementById('emailPrompt').value);
-      formData.append('subjectPrefix', document.getElementById('subjectPrefix').value);
-
       try {
-        const res = await fetch('/api/generate', { method: 'POST', body: formData });
+        const res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            rows: filtered,
+            openaiKey: document.getElementById('openaiKey').value,
+            emailPrompt: document.getElementById('emailPrompt').value,
+            subjectPrefix: document.getElementById('subjectPrefix').value,
+          }),
+        });
         const data = await res.json();
 
         if (!res.ok) {
@@ -622,7 +787,6 @@
           return;
         }
 
-        // Update cards with send status
         const resultMap = {};
         data.results.forEach(r => { resultMap[r.to] = r; });
 
@@ -634,11 +798,9 @@
           const card = document.getElementById('card-' + idx);
           if (!card) return;
 
-          // Remove the remove button
           const removeBtn = card.querySelector('.btn-danger');
           if (removeBtn) removeBtn.remove();
 
-          // Add status badge
           const existing = card.querySelector('.send-status');
           if (existing) existing.remove();
 
