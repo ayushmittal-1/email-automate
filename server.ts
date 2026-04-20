@@ -45,7 +45,8 @@ app.post("/api/generate", async (req, res) => {
       return;
     }
 
-    if (!openaiKey) {
+    const resolvedKey = openaiKey || process.env.OPENAI_API_KEY;
+    if (!resolvedKey) {
       res.status(400).json({ error: "OpenAI API key is required" });
       return;
     }
@@ -55,7 +56,7 @@ app.post("/api/generate", async (req, res) => {
       return;
     }
 
-    const openai = new OpenAI({ apiKey: openaiKey });
+    const openai = new OpenAI({ apiKey: resolvedKey });
 
     const results: {
       to: string;
