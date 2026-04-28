@@ -108,7 +108,11 @@ app.post("/api/send", async (req, res) => {
       return;
     }
 
-    if (!smtp?.host || !smtp?.user || !smtp?.pass) {
+    const smtpHost = smtp?.host || process.env.SMTP_HOST;
+    const smtpUser = smtp?.user || process.env.SMTP_USER;
+    const smtpPass = smtp?.pass || process.env.SMTP_PASS;
+
+    if (!smtpHost || !smtpUser || !smtpPass) {
       res.status(400).json({ error: "SMTP configuration is required" });
       return;
     }
@@ -119,15 +123,15 @@ app.post("/api/send", async (req, res) => {
     }
 
     const smtpConfig: SMTPConfig = {
-      host: smtp.host,
-      port: Number(smtp.port) || 587,
-      user: smtp.user,
-      pass: smtp.pass,
+      host: smtpHost,
+      port: Number(smtp?.port || process.env.SMTP_PORT) || 587,
+      user: smtpUser,
+      pass: smtpPass,
     };
 
     const senderInfo: SenderInfo = {
-      name: sender.name,
-      email: sender.email,
+      name: sender?.name || process.env.SENDER_NAME || "",
+      email: sender?.email || process.env.SENDER_EMAIL || "",
     };
 
     const transport = createTransport(smtpConfig);
