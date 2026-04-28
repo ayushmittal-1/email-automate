@@ -820,7 +820,14 @@
         status.textContent = `Sent ${sentCount}/${data.results.length}` + (failCount > 0 ? ` (${failCount} failed)` : '');
         status.className = failCount > 0 ? 'status error' : 'status success';
 
-        btn.style.display = 'none';
+        // Re-enable button for any unsent/failed emails
+        const remaining = generatedEmails.filter(e => !e.error && !e._removed && !(resultMap[e.to]?.success));
+        if (remaining.length > 0) {
+          btn.disabled = false;
+          btn.textContent = `Send All (${remaining.length})`;
+        } else {
+          btn.style.display = 'none';
+        }
       } catch (err) {
         status.textContent = 'Network error: ' + err.message;
         status.className = 'status error';
