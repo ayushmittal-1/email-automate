@@ -153,7 +153,8 @@ export function createTransport(config?: SMTPConfig) {
     port,
     secure: port === 465,
     auth: { user, pass },
-  });
+    family: 4, // Force IPv4 — avoids ENETUNREACH on IPv6-only DNS results
+  } as nodemailer.TransportOptions);
 }
 
 export interface SenderInfo {
