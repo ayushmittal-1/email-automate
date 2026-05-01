@@ -120,7 +120,18 @@ async function processGenerateJob(
 
   for (const row of rows) {
     const name = row["Contact Person"];
-    const email = row["Email"];
+    const email = row["Email"]?.trim();
+
+    if (!email) {
+      job.results.push({
+        to: "",
+        contactName: name,
+        subject: "",
+        body: "",
+        error: "No email address",
+      });
+      continue;
+    }
 
     try {
       const generated = await generateEmail(openai, emailPrompt, row);

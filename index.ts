@@ -1,9 +1,13 @@
 import "dotenv/config";
+import dns from "dns";
 import { readFileSync } from "fs";
 import { parse } from "csv-parse/sync";
 import { createInterface } from "readline";
 import OpenAI from "openai";
 import nodemailer from "nodemailer";
+
+// Force IPv4 DNS resolution — prevents ENETUNREACH on hosts without IPv6
+dns.setDefaultResultOrder("ipv4first");
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
