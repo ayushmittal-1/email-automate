@@ -238,6 +238,56 @@
       color: #34a853;
     }
 
+    /* Progress bar */
+    .progress-container {
+      margin-bottom: 20px;
+      display: none;
+    }
+
+    .progress-label {
+      font-size: 13px;
+      font-weight: 500;
+      color: #555;
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .progress-bar-track {
+      width: 100%;
+      height: 8px;
+      background: #e0e0e0;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.3s ease;
+      width: 0%;
+    }
+
+    .progress-bar-fill.generate {
+      background: #4a90d9;
+    }
+
+    .progress-bar-fill.send {
+      background: #34a853;
+    }
+
+    /* Warning banner */
+    .warning-banner {
+      background: #fff8e1;
+      border: 1px solid #ffcc02;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-bottom: 20px;
+      font-size: 13px;
+      color: #856404;
+      display: none;
+    }
+
     /* Email preview cards */
     .email-card {
       background: #fff;
@@ -369,6 +419,9 @@
   <div class="container">
     <h1>Email Automation</h1>
 
+    <!-- Warning banner for large CSVs -->
+    <div class="warning-banner" id="warningBanner"></div>
+
     <!-- Settings Panel -->
     <div class="settings-toggle" onclick="toggleSettings()">
       <span>Settings</span>
@@ -445,6 +498,17 @@
       </div>
     </div>
 
+    <!-- Progress bar -->
+    <div class="progress-container" id="progressContainer">
+      <div class="progress-label">
+        <span id="progressText">Processing...</span>
+        <span id="progressPercent">0%</span>
+      </div>
+      <div class="progress-bar-track">
+        <div class="progress-bar-fill generate" id="progressFill"></div>
+      </div>
+    </div>
+
     <!-- Previews -->
     <div id="previews"></div>
   </div>
@@ -455,6 +519,9 @@
     let csvColumns = [];
     let activeFilters = {};
     let generatedEmails = [];
+    let pollTimer = null;
+    let activeJobId = null;
+    let activeJobType = null;
 
     // ── Load config from server ──────────────────────────────────────────────
 
@@ -473,6 +540,7 @@
     }
 
     loadConfig();
+    restoreJobState();
 
     // ── Settings toggle ──────────────────────────────────────────────────────
 
@@ -523,6 +591,15 @@
         activeFilters = {};
         buildFilters();
         document.getElementById('generateBtn').disabled = false;
+
+        // Show warning for large CSVs
+        const banner = document.getElementById('warningBanner');
+        if (csvRows.length >= 500) {
+          banner.textContent = `This CSV has ${csvRows.length} rows. Gmail limits sending to ~500 emails/day. Consider filtering or splitting your list.`;
+          banner.style.display = 'block';
+        } else {
+          banner.style.display = 'none';
+        }
       };
       reader.readAsText(file);
     }
@@ -618,6 +695,90 @@
       el.innerHTML = `<strong>${filtered.length}</strong> of ${csvRows.length} contacts selected`;
     }
 
+    // ── Progress bar helpers ─────────────────────────────────────────────────
+
+    function showProgress(type, text) {
+      const container = document.getElementById('progressContainer');
+      const fill = document.getElementById('progressFill');
+      container.style.display = 'block';
+      fill.className = 'progress-bar-fill ' + type;
+      fill.style.width = '0%';
+      document.getElementById('progressText').textContent = text;
+      document.getElementById('progressPercent').textContent = '0%';
+    }
+
+    function updateProgress(processed, total) {
+      const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
+      document.getElementById('progressFill').style.width = pct + '%';
+      document.getElementById('progressPercent').textContent = pct + '%';
+    }
+
+    function hideProgress() {
+      document.getElementById('progressContainer').style.display = 'none';
+    }
+
+    // ── Polling ──────────────────────────────────────────────────────────────
+
+    function stopPolling() {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+      activeJobId = null;
+      activeJobType = null;
+    }
+
+    function startPolling(jobId, type, onResults, onComplete) {
+      stopPolling();
+      activeJobId = jobId;
+      activeJobType = type;
+      let receivedCount = 0;
+
+      pollTimer = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/jobs/${jobId}?since=${receivedCount}`);
+          if (!res.ok) {
+            stopPolling();
+            hideProgress();
+            const status = document.getElementById('status');
+            if (res.status === 404) {
+              status.textContent = 'Server restarted, please re-generate';
+            } else {
+              status.textContent = 'Polling error';
+            }
+            status.className = 'status error';
+            resetButtons();
+            return;
+          }
+
+          const data = await res.json();
+
+          if (data.results.length > 0) {
+            onResults(data.results, receivedCount);
+            receivedCount += data.results.length;
+          }
+
+          updateProgress(data.processed, data.total);
+          document.getElementById('progressText').textContent =
+            `${type === 'generate' ? 'Generating' : 'Sending'} ${data.processed}/${data.total}...`;
+
+          if (data.status === 'completed' || data.status === 'failed') {
+            stopPolling();
+            hideProgress();
+            onComplete(data);
+          }
+        } catch (err) {
+          // Network blip — silently retry on next interval
+        }
+      }, 1000);
+    }
+
+    function resetButtons() {
+      const btn = document.getElementById('generateBtn');
+      btn.disabled = csvRows.length === 0;
+      btn.textContent = 'Generate Previews';
+    }
+
     // ── Generate previews ────────────────────────────────────────────────────
 
     async function generatePreviews() {
@@ -640,9 +801,12 @@
       status.textContent = '';
       status.className = 'status';
       document.getElementById('previews').innerHTML = '';
+      generatedEmails = [];
+
+      showProgress('generate', `Generating 0/${filtered.length}...`);
 
       try {
-        const res = await fetch('/api/generate', {
+        const res = await fetch('/api/jobs/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -659,66 +823,79 @@
           status.className = 'status error';
           btn.disabled = false;
           btn.textContent = 'Generate Previews';
+          hideProgress();
           return;
         }
 
-        generatedEmails = data.emails;
-        renderPreviews();
-
-        const successCount = generatedEmails.filter(e => !e.error).length;
-        status.textContent = `Generated ${successCount}/${generatedEmails.length} emails`;
-        status.className = 'status success';
-
-        if (successCount > 0) {
-          sendBtn.style.display = 'inline-flex';
-        }
+        startPolling(data.jobId, 'generate',
+          // onResults — render cards incrementally
+          (newResults, startIdx) => {
+            newResults.forEach((email, i) => {
+              const idx = startIdx + i;
+              generatedEmails[idx] = email;
+              appendEmailCard(email, idx);
+            });
+            updateSendButton();
+          },
+          // onComplete
+          (jobData) => {
+            const successCount = generatedEmails.filter(e => !e.error).length;
+            status.textContent = `Generated ${successCount}/${generatedEmails.length} emails`;
+            status.className = 'status success';
+            btn.disabled = false;
+            btn.textContent = 'Generate Previews';
+            updateSendButton();
+          }
+        );
       } catch (err) {
         status.textContent = 'Network error: ' + err.message;
         status.className = 'status error';
+        btn.disabled = false;
+        btn.textContent = 'Generate Previews';
+        hideProgress();
       }
-
-      btn.disabled = false;
-      btn.textContent = 'Generate Previews';
     }
 
-    // ── Render email previews ────────────────────────────────────────────────
+    // ── Render email cards ───────────────────────────────────────────────────
 
-    function renderPreviews() {
+    function appendEmailCard(email, idx) {
+      const container = document.getElementById('previews');
+      const card = document.createElement('div');
+      card.className = 'email-card';
+      card.id = 'card-' + idx;
+
+      if (email.error) {
+        card.innerHTML = `
+          <div class="email-card-header">
+            <div>
+              <div class="to">${esc(email.contactName)} &lt;${esc(email.to)}&gt;</div>
+              <div class="error-badge">Error: ${esc(email.error)}</div>
+            </div>
+          </div>
+        `;
+      } else {
+        card.innerHTML = `
+          <div class="email-card-header">
+            <div>
+              <div class="to">${esc(email.contactName)} &lt;${esc(email.to)}&gt;</div>
+              <div class="subject">${esc(email.subject)}</div>
+            </div>
+            <button class="btn btn-danger" onclick="removeEmail(${idx})">Remove</button>
+          </div>
+          <div class="body">${esc(email.body)}</div>
+        `;
+      }
+
+      container.appendChild(card);
+    }
+
+    function renderAllPreviews() {
       const container = document.getElementById('previews');
       container.innerHTML = '';
-
       generatedEmails.forEach((email, idx) => {
-        if (email._removed) return;
-
-        const card = document.createElement('div');
-        card.className = 'email-card';
-        card.id = 'card-' + idx;
-
-        if (email.error) {
-          card.innerHTML = `
-            <div class="email-card-header">
-              <div>
-                <div class="to">${esc(email.contactName)} &lt;${esc(email.to)}&gt;</div>
-                <div class="error-badge">Error: ${esc(email.error)}</div>
-              </div>
-            </div>
-          `;
-        } else {
-          card.innerHTML = `
-            <div class="email-card-header">
-              <div>
-                <div class="to">${esc(email.contactName)} &lt;${esc(email.to)}&gt;</div>
-                <div class="subject">${esc(email.subject)}</div>
-              </div>
-              <button class="btn btn-danger" onclick="removeEmail(${idx})">Remove</button>
-            </div>
-            <div class="body">${esc(email.body)}</div>
-          `;
-        }
-
-        container.appendChild(card);
+        if (!email || email._removed) return;
+        appendEmailCard(email, idx);
       });
-
       updateSendButton();
     }
 
@@ -729,7 +906,10 @@
     }
 
     function updateSendButton() {
-      const remaining = generatedEmails.filter(e => !e.error && !e._removed);
+      // Don't show send button while generation is still running
+      if (activeJobType === 'generate') return;
+
+      const remaining = generatedEmails.filter(e => e && !e.error && !e._removed && !e._sent);
       const sendBtn = document.getElementById('sendBtn');
       if (remaining.length > 0) {
         sendBtn.style.display = 'inline-flex';
@@ -745,13 +925,15 @@
       const btn = document.getElementById('sendBtn');
       const status = document.getElementById('status');
 
-      const emailsToSend = generatedEmails.filter(e => !e.error && !e._removed);
+      const emailsToSend = generatedEmails.filter(e => e && !e.error && !e._removed && !e._sent);
       if (emailsToSend.length === 0) return;
 
       btn.disabled = true;
       btn.innerHTML = '<span class="spinner"></span> Sending...';
       status.textContent = '';
       status.className = 'status';
+
+      showProgress('send', `Sending 0/${emailsToSend.length}...`);
 
       const payload = {
         emails: emailsToSend.map(e => ({
@@ -772,7 +954,7 @@
       };
 
       try {
-        const res = await fetch('/api/send', {
+        const res = await fetch('/api/jobs/send', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -784,19 +966,51 @@
           status.className = 'status error';
           btn.disabled = false;
           btn.textContent = `Send All (${emailsToSend.length})`;
+          hideProgress();
           return;
         }
 
-        const resultMap = {};
-        data.results.forEach(r => { resultMap[r.to] = r; });
+        startPolling(data.jobId, 'send',
+          // onResults — update card badges incrementally
+          (newResults) => {
+            newResults.forEach(result => {
+              applySendResult(result);
+            });
+          },
+          // onComplete
+          (jobData) => {
+            const allResults = getAllSendResults(jobData);
+            const sentCount = allResults.filter(r => r.success).length;
+            const failCount = allResults.filter(r => !r.success).length;
+            status.textContent = `Sent ${sentCount}/${allResults.length}` + (failCount > 0 ? ` (${failCount} failed)` : '');
+            status.className = failCount > 0 ? 'status error' : 'status success';
 
-        generatedEmails.forEach((email, idx) => {
-          if (email._removed || email.error) return;
-          const result = resultMap[email.to];
-          if (!result) return;
+            const remaining = generatedEmails.filter(e => e && !e.error && !e._removed && !e._sent);
+            if (remaining.length > 0) {
+              btn.disabled = false;
+              btn.textContent = `Send All (${remaining.length})`;
+            } else {
+              btn.style.display = 'none';
+            }
+          }
+        );
+      } catch (err) {
+        status.textContent = 'Network error: ' + err.message;
+        status.className = 'status error';
+        btn.disabled = false;
+        btn.textContent = `Send All (${emailsToSend.length})`;
+        hideProgress();
+      }
+    }
 
+    function applySendResult(result) {
+      // Find the card for this email address
+      for (let idx = 0; idx < generatedEmails.length; idx++) {
+        const email = generatedEmails[idx];
+        if (!email || email._removed || email.error || email._sent) continue;
+        if (email.to === result.to) {
           const card = document.getElementById('card-' + idx);
-          if (!card) return;
+          if (!card) continue;
 
           const removeBtn = card.querySelector('.btn-danger');
           if (removeBtn) removeBtn.remove();
@@ -808,31 +1022,132 @@
           if (result.success) {
             badge.className = 'send-status sent';
             badge.textContent = 'Sent';
+            email._sent = true;
           } else {
             badge.className = 'send-status failed';
             badge.textContent = 'Failed: ' + (result.error || 'Unknown error');
           }
           card.appendChild(badge);
-        });
-
-        const sentCount = data.results.filter(r => r.success).length;
-        const failCount = data.results.filter(r => !r.success).length;
-        status.textContent = `Sent ${sentCount}/${data.results.length}` + (failCount > 0 ? ` (${failCount} failed)` : '');
-        status.className = failCount > 0 ? 'status error' : 'status success';
-
-        // Re-enable button for any unsent/failed emails
-        const remaining = generatedEmails.filter(e => !e.error && !e._removed && !(resultMap[e.to]?.success));
-        if (remaining.length > 0) {
-          btn.disabled = false;
-          btn.textContent = `Send All (${remaining.length})`;
-        } else {
-          btn.style.display = 'none';
+          break;
         }
-      } catch (err) {
-        status.textContent = 'Network error: ' + err.message;
-        status.className = 'status error';
-        btn.disabled = false;
-        btn.textContent = `Send All (${emailsToSend.length})`;
+      }
+    }
+
+    function getAllSendResults(jobData) {
+      // jobData.results only has the incremental tail; reconstruct from generatedEmails
+      const results = [];
+      generatedEmails.forEach(email => {
+        if (!email || email._removed || email.error) return;
+        if (email._sent) {
+          results.push({ to: email.to, success: true });
+        }
+      });
+      // Also include failures from the last batch
+      if (jobData.results) {
+        jobData.results.forEach(r => {
+          if (!r.success) results.push(r);
+        });
+      }
+      return results;
+    }
+
+    // ── Restore job state on page refresh ────────────────────────────────────
+
+    async function restoreJobState() {
+      try {
+        const res = await fetch('/api/jobs/current');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // Restore generate job
+        if (data.generate) {
+          const gen = data.generate;
+          generatedEmails = gen.results || [];
+          renderAllPreviews();
+
+          if (gen.status === 'running') {
+            const btn = document.getElementById('generateBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Generating...';
+            showProgress('generate', `Generating ${gen.processed}/${gen.total}...`);
+            updateProgress(gen.processed, gen.total);
+
+            startPolling(gen.id, 'generate',
+              (newResults, startIdx) => {
+                newResults.forEach((email, i) => {
+                  const idx = startIdx + i;
+                  generatedEmails[idx] = email;
+                  appendEmailCard(email, idx);
+                });
+                updateSendButton();
+              },
+              (jobData) => {
+                const successCount = generatedEmails.filter(e => !e.error).length;
+                document.getElementById('status').textContent = `Generated ${successCount}/${generatedEmails.length} emails`;
+                document.getElementById('status').className = 'status success';
+                btn.disabled = false;
+                btn.textContent = 'Generate Previews';
+                updateSendButton();
+              }
+            );
+          } else {
+            // Completed generate job — just show summary
+            const successCount = generatedEmails.filter(e => !e.error).length;
+            document.getElementById('status').textContent = `Generated ${successCount}/${generatedEmails.length} emails`;
+            document.getElementById('status').className = 'status success';
+            updateSendButton();
+          }
+        }
+
+        // Restore send job
+        if (data.send && data.generate) {
+          const snd = data.send;
+          // Apply already-processed send results
+          if (snd.results) {
+            snd.results.forEach(result => applySendResult(result));
+          }
+
+          if (snd.status === 'running') {
+            const btn = document.getElementById('sendBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Sending...';
+            showProgress('send', `Sending ${snd.processed}/${snd.total}...`);
+            updateProgress(snd.processed, snd.total);
+
+            startPolling(snd.id, 'send',
+              (newResults) => {
+                newResults.forEach(result => applySendResult(result));
+              },
+              (jobData) => {
+                hideProgress();
+                const allResults = getAllSendResults(jobData);
+                const sentCount = allResults.filter(r => r.success).length;
+                const failCount = allResults.filter(r => !r.success).length;
+                const status = document.getElementById('status');
+                status.textContent = `Sent ${sentCount}/${allResults.length}` + (failCount > 0 ? ` (${failCount} failed)` : '');
+                status.className = failCount > 0 ? 'status error' : 'status success';
+
+                const remaining = generatedEmails.filter(e => e && !e.error && !e._removed && !e._sent);
+                if (remaining.length > 0) {
+                  btn.disabled = false;
+                  btn.textContent = `Send All (${remaining.length})`;
+                } else {
+                  btn.style.display = 'none';
+                }
+              }
+            );
+          } else if (snd.status === 'completed') {
+            const allResults = getAllSendResults(snd);
+            const sentCount = allResults.filter(r => r.success).length;
+            const failCount = allResults.filter(r => !r.success).length;
+            const status = document.getElementById('status');
+            status.textContent = `Sent ${sentCount}/${allResults.length}` + (failCount > 0 ? ` (${failCount} failed)` : '');
+            status.className = failCount > 0 ? 'status error' : 'status success';
+            updateSendButton();
+          }
+        }
+      } catch (e) {
+        // Server not reachable or no jobs — that's fine
       }
     }
 
